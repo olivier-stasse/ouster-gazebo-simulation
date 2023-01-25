@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ouster-gazebo-simulation</name>
+  <version>2.0.2</version>
+  <description>
+    Metapackage ouster Gazebo Simulation
+  </description>
+
+  <license>BSD</license>
+  <author>Kevin Hallenbeck</author>
+  <author email="tlasguigne@laas.fr">Thibaud Lasguignes</author>
+  <maintainer email="guilhem.saurel@laas.fr">Guilhem Saurel</maintainer>
+  <url type="repository">https://gepgitlab.laas.fr/gepetto/ouster-gazebo-simulation</url>
+  <url type="bugtracker">https://gepgitlab.laas.fr/gepetto/ouster-gazebo-simulation/issues</url>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>ament_cmake</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>ouster_os1_64</exec_depend>
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+
+</package>
