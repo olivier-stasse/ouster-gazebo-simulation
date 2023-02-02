@@ -40,11 +40,11 @@
 #define GAZEBO_GPU_RAY 0
 #endif
 
-// Custom Callback Queue
-#include <ros/advertise_options.h>
-#include <ros/callback_queue.h>
-#include <ros/ros.h>
+// ROS
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
+// Gazebo 
 #include <gazebo/common/Plugin.hh>
 #include <gazebo/common/Time.hh>
 #include <gazebo/msgs/MessageTypes.hh>
@@ -72,7 +72,7 @@
 
 namespace gazebo {
 
-class GazeboRosOusterLaser : public RayPlugin {
+  class GazeboRosOusterLaser : public RayPlugin,rclcpp::Node {
   /// \brief Constructor
   /// \param parent The parent entity, must be a Model or a Sensor
  public:
@@ -95,13 +95,9 @@ class GazeboRosOusterLaser : public RayPlugin {
  private:
   sensors::RaySensorPtr parent_ray_sensor_;
 
-  /// \brief Pointer to ROS node
- private:
-  ros::NodeHandle* nh_;
-
   /// \brief ROS publisher
  private:
-  ros::Publisher pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_;
 
   /// \brief topic name
  private:
@@ -143,15 +139,6 @@ class GazeboRosOusterLaser : public RayPlugin {
  private:
   std::string robot_namespace_;
 
-  // Custom Callback Queue
- private:
-  ros::CallbackQueue laser_queue_;
-
- private:
-  void laserQueueThread();
-
- private:
-  boost::thread callback_laser_queue_thread_;
 
   // Subscribe to gazebo laserscan
  private:
