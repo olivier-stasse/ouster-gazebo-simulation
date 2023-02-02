@@ -46,8 +46,7 @@
 #else
 #include <gazebo/sensors/RaySensor.hh>
 #endif
-#include <sensor_msgs/PointCloud2.h>
-#include <tf/tf.h>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include <gazebo/sensors/SensorTypes.hh>
 #include <gazebo/transport/Node.hh>
@@ -68,21 +67,14 @@ GZ_REGISTER_SENSOR_PLUGIN(GazeboRosOusterLaser)
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor
 GazeboRosOusterLaser::GazeboRosOusterLaser()
-    : nh_(NULL), min_range_(0), max_range_(0), gaussian_noise_(0) {}
+: Node("gazebo_ros_ouster_laser"), min_range_(0), max_range_(0), gaussian_noise_(0) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Destructor
 GazeboRosOusterLaser::~GazeboRosOusterLaser() {
   ////////////////////////////////////////////////////////////////////////////////
   // Finalize the controller / Custom Callback Queue
-  laser_queue_.clear();
-  laser_queue_.disable();
-  if (nh_) {
-    nh_->shutdown();
-    delete nh_;
-    nh_ = NULL;
-  }
-  callback_laser_queue_thread_.join();
+  rclcpp::shutdown();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,69 +99,69 @@ void GazeboRosOusterLaser::Load(sensors::SensorPtr _parent,
                               << STR_Gpu << "Ray Sensor as its parent.");
   }
 
-  ROS_INFO("Ouster laser plugin : Getting the %sRay sensor parameters.",
+  RCLCPP_INFO(get_logger(),"Ouster laser plugin : Getting the %sRay sensor parameters.",
            STR_Gpu);
 
   robot_namespace_ = "/";
   if (_sdf->HasElement("robotNamespace")) {
     robot_namespace_ = _sdf->GetElement("robotNamespace")->Get<std::string>();
-    ROS_INFO("Ouster laser plugin : Robot namespace set to %s",
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin : Robot namespace set to %s",
              robot_namespace_.c_str());
   }
 
   if (!_sdf->HasElement("frameName")) {
-    ROS_INFO("Ouster laser plugin missing <frameName>, defaults to /world");
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin missing <frameName>, defaults to /world");
     frame_name_ = "/world";
   } else {
     frame_name_ = _sdf->GetElement("frameName")->Get<std::string>();
-    ROS_INFO("Ouster laser plugin : Frame name set to %s", frame_name_.c_str());
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin : Frame name set to %s", frame_name_.c_str());
   }
 
   if (!_sdf->HasElement("min_range")) {
-    ROS_INFO("Ouster laser plugin missing <min_range>, defaults to 0");
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin missing <min_range>, defaults to 0");
     min_range_ = 0;
   } else {
     min_range_ = _sdf->GetElement("min_range")->Get<double>();
-    ROS_INFO("Ouster laser plugin : Min range set to %f", min_range_);
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin : Min range set to %f", min_range_);
   }
 
   if (!_sdf->HasElement("max_range")) {
-    ROS_INFO("Ouster laser plugin missing <max_range>, defaults to infinity");
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin missing <max_range>, defaults to infinity");
     max_range_ = INFINITY;
   } else {
     max_range_ = _sdf->GetElement("max_range")->Get<double>();
-    ROS_INFO("Ouster laser plugin : Max range set to %f", max_range_);
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin : Max range set to %f", max_range_);
   }
 
   if (!_sdf->HasElement("topicName")) {
-    ROS_INFO("Ouster laser plugin missing <topicName>, defaults to /points");
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin missing <topicName>, defaults to /points");
     topic_name_ = "/points";
   } else {
     topic_name_ = _sdf->GetElement("topicName")->Get<std::string>();
-    ROS_INFO("Ouster laser plugin : Topic name set to %s", topic_name_.c_str());
+    RCLCPP_INFO(get_logger(),"Ouster laser plugin : Topic name set to %s", topic_name_.c_str());
   }
 
   if (!_sdf->HasElement("gaussianNoise")) {
-    ROS_INFO(
+    RCLCPP_INFO(get_logger(),
         "Ouster laser plugin missing <gaussianNoise>, defaults to 0.0, using "
         "noise generation based on datasheet");
     gaussian_noise_ = 0;
   } else {
     gaussian_noise_ = _sdf->GetElement("gaussianNoise")->Get<double>();
     if (gaussian_noise_ == 0.0)  // shouldn't it be compared to epsilon ?
-      ROS_INFO(
+      RCLCPP_INFO(get_logger(),
           "Ouster laser plugin : gaussian Noise set to 0, using noise "
           "generation based on datasheet");
     else if (gaussian_noise_ == -1.0)
-      ROS_INFO("Ouster laser plugin : gaussian Noise unset");
+      RCLCPP_INFO(get_logger(),"Ouster laser plugin : gaussian Noise unset");
     else
-      ROS_INFO("Ouster laser plugin : gaussian Noise set to %f",
+      RCLCPP_INFO(get_logger(),"Ouster laser plugin : gaussian Noise set to %f",
                gaussian_noise_);
   }
 
   // Make sure the ROS node for Gazebo has already been initialized
-  if (!ros::isInitialized()) {
-    ROS_FATAL_STREAM(
+  if (!rclcpp::ok()) {
+    RCLCPP_FATAL_STREAM(get_logger(),
         "A ROS node for Gazebo has not been initialized, unable to load "
         "plugin. "
         << "Load the Gazebo system plugin 'libgazebo_ros_api_plugin.so' in the "
@@ -178,39 +170,22 @@ void GazeboRosOusterLaser::Load(sensors::SensorPtr _parent,
   }
 
   // Create node handle
-  nh_ = new ros::NodeHandle(robot_namespace_);
 
-  // Resolve tf prefix
-  std::string prefix;
-  nh_->getParam(std::string("tf_prefix"), prefix);
-  if (robot_namespace_ != "/") {
-    prefix = robot_namespace_;
-  }
-  boost::trim_right_if(prefix, boost::is_any_of("/"));
-  frame_name_ = tf::resolve(prefix, frame_name_);
 
   // Advertise publisher with a custom callback queue
   if (topic_name_ != "") {
-    ros::AdvertiseOptions ao =
-        ros::AdvertiseOptions::create<sensor_msgs::PointCloud2>(
-            topic_name_, 1, boost::bind(&GazeboRosOusterLaser::ConnectCb, this),
-            boost::bind(&GazeboRosOusterLaser::ConnectCb, this), ros::VoidPtr(),
-            &laser_queue_);
-    pub_ = nh_->advertise(ao);
+    pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(topic_name_, 1);
   }
 
   // Sensor generation off by default
   parent_ray_sensor_->SetActive(false);
 
-  // Start custom queue for laser
-  callback_laser_queue_thread_ =
-      boost::thread(boost::bind(&GazeboRosOusterLaser::laserQueueThread, this));
 
 #if GAZEBO_MAJOR_VERSION >= 7
-  ROS_INFO("Ouster %slaser plugin ready, %i lasers", STR_GPU_,
+  RCLCPP_INFO(get_logger(),"Ouster %slaser plugin ready, %i lasers", STR_GPU_,
            parent_ray_sensor_->VerticalRangeCount());
 #else
-  ROS_INFO("Ouster %slaser plugin ready, %i lasers", STR_GPU_,
+  RCLCPP_INFO(get_logger(),"Ouster %slaser plugin ready, %i lasers", STR_GPU_,
            parent_ray_sensor_->GetVerticalRangeCount());
 #endif
 }
@@ -219,7 +194,7 @@ void GazeboRosOusterLaser::Load(sensors::SensorPtr _parent,
 // Subscribe on-demand
 void GazeboRosOusterLaser::ConnectCb() {
   boost::lock_guard<boost::mutex> lock(lock_);
-  if (pub_.getNumSubscribers()) {
+  if (pub_->get_subscription_count()) {
     if (!sub_) {
 #if GAZEBO_MAJOR_VERSION >= 7
       sub_ = gazebo_node_->Subscribe(this->parent_ray_sensor_->Topic(),
@@ -286,29 +261,29 @@ void GazeboRosOusterLaser::OnScan(ConstLaserScanStampedPtr& _msg) {
 
   // Populate message fields
   const uint32_t POINT_STEP = 32;
-  sensor_msgs::PointCloud2 msg;
+  sensor_msgs::msg::PointCloud2 msg;
   msg.header.frame_id = frame_name_;
-  msg.header.stamp = ros::Time(_msg->time().sec(), _msg->time().nsec());
+  msg.header.stamp = rclcpp::Time(_msg->time().sec(), _msg->time().nsec());
   msg.fields.resize(5);
   msg.fields[0].name = "x";
   msg.fields[0].offset = 0;
-  msg.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+  msg.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
   msg.fields[0].count = 1;
   msg.fields[1].name = "y";
   msg.fields[1].offset = 4;
-  msg.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+  msg.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
   msg.fields[1].count = 1;
   msg.fields[2].name = "z";
   msg.fields[2].offset = 8;
-  msg.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+  msg.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
   msg.fields[2].count = 1;
   msg.fields[3].name = "intensity";
   msg.fields[3].offset = 16;
-  msg.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
+  msg.fields[3].datatype = sensor_msgs::msg::PointField::FLOAT32;
   msg.fields[3].count = 1;
   msg.fields[4].name = "ring";
   msg.fields[4].offset = 20;
-  msg.fields[4].datatype = sensor_msgs::PointField::UINT16;
+  msg.fields[4].datatype = sensor_msgs::msg::PointField::UINT16;
   msg.fields[4].count = 1;
   msg.data.resize(verticalRangeCount * rangeCount * POINT_STEP);
 
@@ -404,16 +379,8 @@ void GazeboRosOusterLaser::OnScan(ConstLaserScanStampedPtr& _msg) {
   msg.data.resize(msg.row_step);  // Shrink to actual size
 
   // Publish output
-  pub_.publish(msg);
+  pub_->publish(msg);
 }
 
-// Custom Callback Queue
-////////////////////////////////////////////////////////////////////////////////
-// Custom callback queue thread
-void GazeboRosOusterLaser::laserQueueThread() {
-  while (nh_->ok()) {
-    laser_queue_.callAvailable(ros::WallDuration(0.01));
-  }
-}
 
 }  // namespace gazebo
